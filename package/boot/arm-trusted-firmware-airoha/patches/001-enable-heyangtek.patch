@@ -1,0 +1,101 @@
+--- a/plat/ecnt/common/drivers/flash/spi_nand_flash_table.c
++++ b/plat/ecnt/common/drivers/flash/spi_nand_flash_table.c
+@@ -96,13 +96,11 @@
+ struct spi_nand_flash_ooblayout ooblayout_type13 = {
+ 	.oobsize = 28, 
+ 	.oobfree = {{32,28}, {0,0}}
+ };
+ 
+-#if 0
+ struct spi_nand_flash_ooblayout ooblayout_type14 = {
+ 	.oobsize = 20, 
+ 	.oobfree = {{0,4}, {4,4}, {36,4}, {68,4}, {100,4}}
+ };
+-#endif
+ 
+ struct spi_nand_flash_ooblayout ooblayout_type15 = {
+ 	.oobsize = 28, 
+@@ -114,17 +112,15 @@
+ 	.oobsize = 28, 
+ 	.oobfree = {{4,8}, {20,8}, {36,8}, {52,4}, {0,0}}
+ };
+ 
+-#if 0
+ struct spi_nand_flash_ooblayout ooblayout_type16 = {
+ 	.oobsize = 44, 
+ 	.oobfree = {{0,4}, {4,2}, {19,2}, {34,2}, {49,2}, {96,32}}
+ };
+ 
+ struct spi_nand_flash_ooblayout ooblayout_type17 = {
+ 	.oobsize = 36, 
+ 	.oobfree = {{0,4}, {4,4}, {36,4}, {68,4}, {100,4}, {132,4}, {164,4}, {196,4}, {228,4}}
+ };
+-#endif
+ 
+ struct spi_nand_flash_ooblayout ooblayout_type18 = {
+ 	.oobsize = 88, 
+@@ -1526,7 +1522,6 @@ const struct SPI_NAND_FLASH_INFO_T spi_nand_flash_tables[] = {
+ 	},
+ #endif
+ 
+-#if 0
+ 	/* ===== HeYangTek ===== */
+ 	{
+ 		mfr_id: 					_SPI_NAND_MANUFACTURER_ID_HEYANG,
+@@ -1636,7 +1631,6 @@ const struct SPI_NAND_FLASH_INFO_T spi_nand_flash_tables[] = {
+ 		extend_dev_id:				_SPI_NAND_DUMMY_EXTEND_DEVICE_ID,
+ 	},
+-#endif
+ 
+ #if !defined(TCSUPPORT_AUTOBENCH)
+ #if 0--- a/plat/ecnt/common/drivers/flash/spi_nand_flash_table.c
++++ b/plat/ecnt/common/drivers/flash/spi_nand_flash_table.c
+@@ -96,13 +96,11 @@
+ struct spi_nand_flash_ooblayout ooblayout_type13 = {
+ 	.oobsize = 28, 
+ 	.oobfree = {{32,28}, {0,0}}
+ };
+ 
+-#if 0
+ struct spi_nand_flash_ooblayout ooblayout_type14 = {
+ 	.oobsize = 20, 
+ 	.oobfree = {{0,4}, {4,4}, {36,4}, {68,4}, {100,4}}
+ };
+-#endif
+ 
+ struct spi_nand_flash_ooblayout ooblayout_type15 = {
+ 	.oobsize = 28, 
+@@ -114,17 +112,15 @@
+ 	.oobsize = 28, 
+ 	.oobfree = {{4,8}, {20,8}, {36,8}, {52,4}, {0,0}}
+ };
+ 
+-#if 0
+ struct spi_nand_flash_ooblayout ooblayout_type16 = {
+ 	.oobsize = 44, 
+ 	.oobfree = {{0,4}, {4,2}, {19,2}, {34,2}, {49,2}, {96,32}}
+ };
+ 
+ struct spi_nand_flash_ooblayout ooblayout_type17 = {
+ 	.oobsize = 36, 
+ 	.oobfree = {{0,4}, {4,4}, {36,4}, {68,4}, {100,4}, {132,4}, {164,4}, {196,4}, {228,4}}
+ };
+-#endif
+ 
+ struct spi_nand_flash_ooblayout ooblayout_type18 = {
+ 	.oobsize = 88, 
+@@ -1526,7 +1522,6 @@ const struct SPI_NAND_FLASH_INFO_T spi_nand_flash_tables[] = {
+ 	},
+ #endif
+ 
+-#if 0
+ 	/* ===== HeYangTek ===== */
+ 	{
+ 		mfr_id: 					_SPI_NAND_MANUFACTURER_ID_HEYANG,
+@@ -1636,7 +1631,6 @@ const struct SPI_NAND_FLASH_INFO_T spi_nand_flash_tables[] = {
+ 		extend_dev_id:				_SPI_NAND_DUMMY_EXTEND_DEVICE_ID,
+ 	},
+-#endif
+ 
+ #if !defined(TCSUPPORT_AUTOBENCH)
+ #if 0
