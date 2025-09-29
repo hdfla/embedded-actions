@@ -1,0 +1,228 @@
+run-name: Build ${{ inputs.board }} - ${{ github.run_number }} (${{ github.run_id }}) - Actor ${{ github.actor || 'Unknown' }}
+name: Build image
+
+on:
+  repository_dispatch:
+  workflow_dispatch:
+    inputs:
+      board:
+        description: 'Board (config selection + cache key)'
+        required: true
+        type: choice
+        default: 'filogic (mt798x)'
+        options:
+          - filogic (mt798x)
+          - ramips (mt7621)
+          - airoha (an75xx)
+          - maple (ipq50xx)
+          - cypress (ipq60xx)
+          - akronite (ipq806x)
+          - hawkeye (ipq807x)
+          - hawkeye-nss (ipq807x-offload)
+          - honeybee (qca953x)
+          - scorpion (qca955x)
+          - dragonfly (qcn550x)
+      variant:
+        description: 'owner/repo [ref]'
+        required: true
+        type: string
+        default: 'hdfla/openwrt main'
+      custom_kernel_repo:
+        description: 'owner/repo [ref]. Empty = stock kernel.'
+        required: false
+        type: string
+        default: ''
+      hostname:
+        description: 'Hostname'
+        required: true
+        type: string
+        default: 'OpenWrt'
+      default_ip:
+        description: 'Default IP address'
+        required: true
+        type: string
+        default: '192.168.1.1'
+      luci_theme:
+        description: 'Default LuCI theme'
+        required: true
+        type: choice
+        default: 'bootstrap'
+        options:
+          - bootstrap
+          - aurora
+          - argon
+      verbosity:
+        description: 'Verbose build output (V=s)'
+        required: true
+        type: choice
+        default: 'No'
+        options:
+          - 'Yes'
+          - 'No'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build OpenWrt
+    runs-on: ubuntu-26.04
+    env:
+      OPENWRT_DIR: ${{ github.workspace }}/openwrt
+      verbose: ${{ inputs.verbosity == 'Yes' && 's' || '' }}
+      CUSTOM_KERNEL: ${{ inputs.custom_kernel_repo }}
+      ARTIFACTS: |
+        ${{ github.workspace }}/openwrt/bin/targets/*/*/*.bin
+        ${{ github.workspace }}/openwrt/bin/targets/*/*/*.fip
+        ${{ github.workspace }}/openwrt/bin/targets/*/*/*.itb
+        ${{ github.workspace }}/openwrt/bin/targets/*/*/atf/*
+        ${{ github.workspace }}/openwrt/.config
+    steps:
+      - name: Parse inputs
+        id: parse
+        run: |
+          board='${{ inputs.board }}'
+          echo "board_short=${board%% (*}" >> "$GITHUB_OUTPUT"
+          read -r repo ref <<< '${{ inputs.variant }}'
+          echo "repo=$repo" >> "$GITHUB_OUTPUT"
+          echo "ref=${ref:-main}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout config repo
+        uses: actions/checkout@v6
+
+      - name: OpenWrt source
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.parse.outputs.repo }}
+          ref: ${{ steps.parse.outputs.ref }}
+          path: openwrt
+          token: ${{ secrets.OWRTPAT }}
+          fetch-depth: 1
+
+      - name: Restore build cache
+        uses: stupidloud/cachewrtbuild@main
+        with:
+          prefix: ${{ env.OPENWRT_DIR }}
+          mixkey: ${{ inputs.board }}
+          ccache: 'false'
+          clean: 'false'
+
+      - name: Install host dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            build-essential clang flex bison g++ gawk gettext git \
+            libncurses-dev libssl-dev python3-setuptools rsync swig unzip zlib1g-dev \
+            file wget ccache gcc-multilib g++-multilib
+
+      - name: Free disk space on runner
+        run: |
+          sudo rm -rf \
+            /opt/ghc /opt/google/chrome /opt/microsoft/msedge /opt/microsoft/powershell \
+            /opt/pipx /usr/lib/mono /usr/local/julia* /usr/local/lib/android \
+            /usr/local/lib/node_modules /usr/local/share/chromium /usr/local/share/powershell \
+            /usr/share/dotnet /usr/share/swift
+          df -h
+          free -h
+
+      - name: Prepare custom kernel tree
+        if: ${{ inputs.custom_kernel_repo != '' }}
+        run: |
+          read -r k_repo k_ref <<< "$CUSTOM_KERNEL"
+          git clone --depth 1 ${k_ref:+--branch "$k_ref"} "https://github.com/$k_repo.git" custom_kernel
+          echo "CUSTOM_KERNEL_BRANCH=$(git -C custom_kernel rev-parse --abbrev-ref HEAD)" >> "$GITHUB_ENV"
+          echo "CUSTOM_KERNEL_COMMIT=$(git -C custom_kernel rev-parse --short HEAD)" >> "$GITHUB_ENV"
+          sed -i -E 's/^(EXTRAVERSION[[:space:]]*=).*/\1/' custom_kernel/Makefile
+
+      - name: Apply feeds, packages and files overlay
+        run: |
+          cd openwrt
+          bs='${{ steps.parse.outputs.board_short }}'
+
+          [ -f "../feeds-$bs" ] && cp "../feeds-$bs" feeds.conf
+
+          if [ -f ../packages ]; then
+            mkdir -p package
+            xargs -r -n1 git -C package clone < ../packages
+          fi
+
+          for d in "../files-$bs" ../files; do
+            [ -d "$d" ] && { cp -r "$d" files; break; }
+          done
+
+      - name: Update and install feeds
+        run: |
+          cd openwrt
+          git config --global url."https://x-access-token:${{ secrets.KNFLPAT }}@github.com/hdfla/embedded-files".insteadOf "https://github.com/hdfla/embedded-files"
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Apply personalization
+        run: |
+          cd openwrt
+          sed -i "s/192.168.[0-9]\{1,3\}.1/${{ inputs.default_ip }}/g" package/base-files/files/bin/config_generate
+          sed -i "s/set system.@system\[-1\].hostname='[^']*'/set system.@system[-1].hostname='${{ inputs.hostname }}'/" package/base-files/files/bin/config_generate
+          sed -i "s/luci-theme-bootstrap/luci-theme-${{ inputs.luci_theme }}/g" feeds/luci/collections/luci/Makefile
+
+      - name: Configure build
+        run: |
+          cd openwrt
+          cp "../config-${{ steps.parse.outputs.board_short }}" .config
+
+          if [ -n "$CUSTOM_KERNEL" ]; then
+            sed -i '/^CONFIG_KERNEL_GIT_/d; /^CONFIG_EXTERNAL_KERNEL_TREE=/d; /^CONFIG_DEVEL=/d' .config
+            printf 'CONFIG_DEVEL=y\nCONFIG_EXTERNAL_KERNEL_TREE="%s/custom_kernel"\n' "${{ github.workspace }}" >> .config
+          fi
+
+          make defconfig
+
+          if [ -n "$CUSTOM_KERNEL" ] && ! grep -q '^CONFIG_EXTERNAL_KERNEL_TREE="' .config; then
+            echo "CONFIG_EXTERNAL_KERNEL_TREE did not survive defconfig"
+            grep -n 'EXTERNAL_KERNEL_TREE\|KERNEL_GIT' .config || true
+            exit 1
+          fi
+
+      - name: Build firmware
+        run: |
+          cd openwrt
+          make -j$(nproc) V=${{ env.verbose }}
+
+      - name: Collect ATF artifacts
+        run: |
+          cd openwrt
+          fw=$(echo bin/targets/*/*)/atf
+          mkdir -p "$fw"
+          find staging_dir -path '*/image/*' -type f \( -name '*.bin' -o -name '*.fip' -o -name '*.itb' -o -name '*.lzma' \) -exec cp -vLt "$fw" {} + || true
+          find build_dir -maxdepth 6 -type f \( -iname '*bl*.bin' -o -iname '*bl*.fip' -o -iname '*bl*.itb' -o -iname '*bl*.lzma' -o -iname 'flash_table.*' \) -exec cp -vLt "$fw" {} + || true
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          notes="$RUNNER_TEMP/release.md"
+          {
+            echo "## OpenWrt $(date +%Y.%m.%d-%H:%M)"
+            echo "- Board: ${{ inputs.board }}"
+            echo "- Repo: ${{ inputs.variant }}"
+            [ -n "$CUSTOM_KERNEL" ] && echo "- Kernel: $CUSTOM_KERNEL @ ${CUSTOM_KERNEL_BRANCH} (${CUSTOM_KERNEL_COMMIT})"
+            echo "- Hostname: ${{ inputs.hostname }}"
+            echo "- IP: ${{ inputs.default_ip }}"
+            echo "- Theme: ${{ inputs.luci_theme }}"
+          } > "$notes"
+          echo "release_tag=$(date +%Y.%m.%d-%H%M)" >> "$GITHUB_OUTPUT"
+          echo "path=$notes" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: openwrt-${{ steps.parse.outputs.board_short }}
+          if-no-files-found: warn
+          path: ${{ env.ARTIFACTS }}
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.notes.outputs.release_tag }}
+          body_path: ${{ steps.notes.outputs.path }}
+          files: ${{ env.ARTIFACTS }}

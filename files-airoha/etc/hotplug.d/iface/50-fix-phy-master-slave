@@ -1,0 +1,27 @@
+#!/bin/sh
+#
+# Workaround for Airoha EN7523 PHY driver defaulting to 'forced-master'.
+#
+# A PHY forced into master mode cannot form a 1000BASE-T link with another
+# PHY that is also forced master, because neither end will assume the
+# slave role. This breaks direct links between two identical EN7523
+# devices (link stays down, no kernel log activity).
+#
+# Setting 'preferred-master' instead lets 1000BASE-T auto-negotiation
+# resolve the clock role via its standard tie-break rules, which fixes
+# device-to-device links while remaining compatible with ordinary
+# link partners (PCs, switches, PON converters).
+#
+# The ethtool setting is not persistent across reboots, so it must be
+# reapplied every time the LAN interface comes up.
+
+[ "$ACTION" = "ifup" ] || exit 0
+[ "$INTERFACE" = "lan" ] || exit 0
+
+for port in $(ls /sys/class/net/ | grep -E '^lan[0-9]+$'); do
+    if ethtool -s "$port" master-slave preferred-master 2>/dev/null; then
+        logger -t phy-fix "$port: master-slave preferred-master applied"
+    else
+        logger -t phy-fix "$port: failed to set preferred-master (driver may not support it)"
+    fi
+done
