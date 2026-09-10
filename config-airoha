@@ -1881,7 +1881,7 @@ CONFIG_HTOP_LMSENSORS=y
 #
 # CONFIG_PACKAGE_u-boot-en7523_askey_rtf8225vw is not set
 # CONFIG_PACKAGE_u-boot-en7523_genexis_pixly_r1 is not set
-CONFIG_PACKAGE_u-boot-en7523_ksb_7523gpontest=y
+CONFIG_PACKAGE_u-boot-en7523_vht_42x6=y
 # CONFIG_PACKAGE_u-boot-en7523_mitrastar-gpt-2742gx4x5v6 is not set
 # CONFIG_PACKAGE_u-boot-en7523_rfb is not set
 # CONFIG_PACKAGE_u-boot-en7523_tplink_ex530v-v1 is not set
