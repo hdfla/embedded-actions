@@ -1,7 +1,7 @@
 CONFIG_PACKAGE_luci=y
 CONFIG_PACKAGE_luci-app-gecoosac=n
 CONFIG_PACKAGE_luci-app-apcontroller=y
-CONFIG_PACKAGE_luci-app-mwan3=n
+CONFIG_PACKAGE_luci-app-mwan3=y
 CONFIG_PACKAGE_luci-app-tailscale=y
 CONFIG_PACKAGE_luci-app-upnp=y
 CONFIG_PACKAGE_luci-proto-wireguard=y
@@ -2847,6 +2847,7 @@ CONFIG_PACKAGE_u-boot-en7523_askey_rtf8225vw=y
 CONFIG_PACKAGE_u-boot-en7523_genexis_pixly_r1=y
 CONFIG_PACKAGE_u-boot-en7523_mitrastar_gpt-2742gx4x5v6=y
 CONFIG_PACKAGE_u-boot-en7523_rfb=y
+CONFIG_PACKAGE_u-boot-en7523_teleq_econet=y
 CONFIG_PACKAGE_u-boot-en7523_tplink_ex530v-v1=y
 CONFIG_PACKAGE_u-boot-en7523_tplink_xx230v-v1=y
 # end of Boot Loaders
