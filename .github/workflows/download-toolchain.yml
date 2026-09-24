@@ -1,0 +1,51 @@
+name: Export Toolchain Cache to PC
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        description: 'The exact Cache Key (e.g., openwrt-toolchain-ramips)'
+        required: true
+        type: string
+      openwrt_path:
+        description: 'Relative path to your openwrt directory from repo root'
+        required: true
+        type: string
+        default: 'openwrt'
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 1. Restore the OpenWrt cache using your exact key
+      - name: Restore OpenWrt Cache
+        uses: actions/cache/restore@v4
+        id: restore-step
+        with:
+          # This assumes standard OpenWrt build targets for toolchains
+          path: |
+            ${{ github.event.inputs.openwrt_path }}/staging_dir
+            ${{ github.event.inputs.openwrt_path }}/build_dir/host
+          key: ${{ github.event.inputs.cache_key }}
+
+      - name: Verify Cache Hit
+        if: steps.restore-step.outputs.cache-hit != 'true'
+        run: |
+          echo "❌ Error: Cache key '${{ github.event.inputs.cache_key }}' not found."
+          exit 1
+
+      # 2. Tar the toolchain to preserve symlinks and permissions
+      - name: Archive Toolchain Components
+        run: |
+          cd ${{ github.event.inputs.openwrt_path }}
+          tar -czf ../openwrt-toolchain.tar.gz staging_dir build_dir/host
+
+      # 3. Push it to standard, downloadable Artifacts
+      - name: Upload Zip Package
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-toolchain-archive
+          path: openwrt-toolchain.tar.gz
+          retention-days: 1
