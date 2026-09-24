@@ -100,17 +100,30 @@ jobs:
         run: |
           set -e
           cd openwrt
-          # Copy feeds.conf if present
-          { cp ../feeds.conf . && echo "feeds.conf copied"; } || echo "No feeds.conf"
+          
+          BOARD="${{ github.event.inputs.board }}"
+          BOARD_SHORT=$(echo "$BOARD" | sed -E 's/ *\(.*\)//' | sed 's/ /-/g')
+          echo "Board short name: $BOARD_SHORT"
+          
+          FEEDS_FILE="../feeds-${BOARD_SHORT}"
+          if [ -f "$FEEDS_FILE" ]; then
+            cp "$FEEDS_FILE" feeds.conf
+            echo "Using $FEEDS_FILE -> feeds.conf"
+          else
+            echo "No $FEEDS_FILE found, keeping source default feeds.conf"
+          fi
+
           # Clone custom packages from packages.txt
           if [ -f ../packages.txt ]; then
             mkdir -p package
             while read url; do
+              [ -z "$url" ] && continue
               folder="${url##*/}"; folder="${folder%.git}"
               git clone "$url" "package/$folder"
               echo "Cloned $folder"
             done < ../packages.txt
           fi
+
           # Copy files/ overlay
           { cp -r ../files . && echo "files/ overlay copied"; } || echo "No files/ overlay"
 
