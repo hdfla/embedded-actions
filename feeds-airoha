@@ -4,5 +4,5 @@ src-git telephony https://github.com/openwrt/telephony.git
 src-git video https://github.com/openwrt/video.git
 
 src-git luci https://git.openwrt.org/project/luci.git
-#src-git luci https://sirherobrine23.com.br/Sirherobrine23/luci.git;netdev-add-autoneg-speed-duplex
-#src-git airoha https://sirherobrine23.com.br/airoha_en7523/luci-packages.git
+src-git luci https://sirherobrine23.com.br/Sirherobrine23/luci.git;netdev-add-autoneg-speed-duplex
+src-git airoha https://sirherobrine23.com.br/airoha_en7523/luci-packages.git
