@@ -5,4 +5,9 @@ https://github.com/f8q8/luci-app-autoreboot.git
 https://github.com/eamonxg/luci-theme-aurora.git
 https://github.com/A1EF/nfqws-openwrt.git
 https://github.com/remittor/zapret-openwrt.git
+https://github.com/mossdef-org/https-dns-proxy.git
+https://github.com/mossdef-org/luci-app-https-dns-proxy.git
+https://github.com/mossdef-org/adblock-fast.git
+https://github.com/mossdef-org/luci-app-adblock-fast.git
+https://github.com/mossdef-org/mwan4.git
 https://github.com/Openwrt-Passwall/openwrt-passwall2.git
