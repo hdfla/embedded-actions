@@ -113,15 +113,15 @@ jobs:
             echo "No $FEEDS_FILE found, keeping source default feeds.conf"
           fi
 
-          # Clone custom packages from packages.txt
-          if [ -f ../packages.txt ]; then
+          # Clone custom packages from packages
+          if [ -f ../packages ]; then
             mkdir -p package
             while read url; do
               [ -z "$url" ] && continue
               folder="${url##*/}"; folder="${folder%.git}"
               git clone "$url" "package/$folder"
               echo "Cloned $folder"
-            done < ../packages.txt
+            done < ../packages
           fi
 
           # Copy files/ overlay
