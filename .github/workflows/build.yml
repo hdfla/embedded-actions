@@ -125,8 +125,16 @@ jobs:
           fi
 
           # Copy files/ overlay
-          { cp -r ../files . && echo "files/ overlay copied"; } || echo "No files/ overlay"
-
+    FILES_DIR="../files-${BOARD_SHORT}"
+    if [ -d "$FILES_DIR" ]; then
+      cp -r "$FILES_DIR" files
+      echo "Using $FILES_DIR -> files/ overlay"
+    elif [ -d ../files ]; then
+      cp -r ../files files
+      echo "Using ../files -> files/ overlay"
+    else
+      echo "No files/ overlay found (checked $FILES_DIR and ../files)"
+    fi
       - name: Update feeds
         run: |
           cd openwrt
