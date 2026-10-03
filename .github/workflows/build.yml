@@ -139,7 +139,7 @@ jobs:
       - name: Update feeds
         run: |
           cd openwrt
-          git config --global url."https://x-access-token:${{ secrets.KNFLPAT }}@github.com/hdfla/embedded-files/".insteadOf "https://github.com/hdfla/embedded-files/"
+          git config --global url."https://x-access-token:${{ secrets.KNFLPAT }}@github.com/hdfla/embedded-files".insteadOf "https://github.com/hdfla/embedded-files"
           ./scripts/feeds update -a && ./scripts/feeds install -a
 
       - name: Apply personalization
