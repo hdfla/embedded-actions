@@ -1,0 +1,30 @@
+name: Verify patch
+
+on:
+  workflow_dispatch:
+    inputs:
+      patch_path:
+        description: 'Patch file path'
+        required: true
+        default: 'package/boot/arm-trusted-firmware-airoha/patches/001-enable-heyangtek.patch'
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone ATF
+        run: |
+          git clone https://sirherobrine23.com.br/airoha/atf-airoha.git atf
+          cd atf
+          git checkout 32c23f83ffab83d5cd33c67e58658f4a71293d79
+
+      - name: Apply patch
+        run: |
+          cd atf
+          git -c user.email=ci@local -c user.name=ci am \
+            "$GITHUB_WORKSPACE/${{ github.event.inputs.patch_path }}"
+          git --no-pager log -1 --stat
