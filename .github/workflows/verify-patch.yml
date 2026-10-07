@@ -25,6 +25,5 @@ jobs:
       - name: Apply patch
         run: |
           cd atf
-          git -c user.email=ci@local -c user.name=ci am \
-            "$GITHUB_WORKSPACE/${{ github.event.inputs.patch_path }}"
-          git --no-pager log -1 --stat
+          git apply -v "$GITHUB_WORKSPACE/package/boot/arm-trusted-firmware-airoha/patches/001-enable-heyangtek.patch"
+          git --no-pager diff --stat
