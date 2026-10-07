@@ -198,6 +198,67 @@ jobs:
           rm -rf packages
           echo "FIRMWARE=$PWD" >> $GITHUB_ENV
 
+          
+      # ====================================================================
+      # TEMPORARY - copy all ATF build artifacts next to the firmware so they
+      # can be inspected before flashing.  Remove this step once the board
+      # boots reliably with HYF1GQ4UDACAE.
+      # ====================================================================
+      - name: Collect ATF build artifacts
+        run: |
+          set -e
+          cd openwrt
+
+          ATF_BUILD_DIR=$(find build_dir -maxdepth 6 -type f -name 'flash_table.bin' 2>/dev/null | head -n1 | xargs -r dirname)
+          STAGING_IMG=$(find staging_dir -maxdepth 4 -type d -name image | head -n1)
+          TARGET_DIR="$FIRMWARE"
+
+          echo "ATF_BUILD_DIR = $ATF_BUILD_DIR"
+          echo "STAGING_IMG   = $STAGING_IMG"
+          echo "TARGET_DIR    = $TARGET_DIR"
+
+          mkdir -p "$TARGET_DIR/atf"
+
+          # 1) Raw outputs of PKG_BUILD_DIR (pre-pack)
+          if [ -n "$ATF_BUILD_DIR" ]; then
+            for f in bl21.bin bl22.lzma bl23.lzma flash_table.bin flash_table.lzma; do
+              if [ -f "$ATF_BUILD_DIR/$f" ]; then
+                cp -v "$ATF_BUILD_DIR/$f" "$TARGET_DIR/atf/"
+              else
+                echo "  (missing, skipped) $f"
+              fi
+            done
+          fi
+
+          # 2) Final packed images from STAGING_DIR_IMAGE
+          if [ -n "$STAGING_IMG" ]; then
+            for f in "$STAGING_IMG"/*-bl2.bin \
+                     "$STAGING_IMG"/*-bl21.bin \
+                     "$STAGING_IMG"/*-bl31.bin \
+                     "$STAGING_IMG"/*-bl31.lzma; do
+              [ -f "$f" ] && cp -v "$f" "$TARGET_DIR/atf/"
+            done
+          fi
+
+          echo "===== atf/ contents ====="
+          ls -la "$TARGET_DIR/atf/"
+
+          # 3) Hard check: does the flash table actually contain our chip?
+          if [ -f "$TARGET_DIR/atf/flash_table.bin" ]; then
+            echo "===== HeYangTek entries found in flash_table.bin ====="
+            if strings "$TARGET_DIR/atf/flash_table.bin" | grep -q _SPI_NAND_DEVICE_ID_HYF1GQ4UDACAE; then
+              strings "$TARGET_DIR/atf/flash_table.bin" | grep _SPI_NAND_DEVICE_ID_HYF || true
+              echo "OK: HYF1GQ4UDACAE is present in the table."
+            else
+              echo "!!! FATAL: HYF1GQ4UDACAE not found in flash_table.bin."
+              echo "!!! You MUST NOT flash this image."
+              exit 1
+            fi
+          else
+            echo "!!! WARNING: flash_table.bin was not found in the ATF build dir."
+          fi
+
+          
       - name: Upload firmware (artifact)
         uses: actions/upload-artifact@v4
         with:
@@ -226,13 +287,26 @@ jobs:
           EOF
           cd ${{ env.FIRMWARE }}
           for f in *.bin; do
-            echo "- $f" >> release.txt
-            echo "  - md5: $(md5sum "$f" | cut -d' ' -f1)" >> release.txt
+            echo "- $f" >> ../release.txt
+            echo "  - md5: $(md5sum "$f" | cut -d' ' -f1)" >> ../release.txt
           done
-          # Add sha256 from sha256sums file if present
           if [ -f sha256sums ]; then
-            echo "  - sha256: $(grep -oE '\w{64}' sha256sums | head -1)" >> release.txt
+            echo "  - sha256: $(grep -oE '\w{64}' sha256sums | head -1)" >> ../release.txt
           fi
+
+          # ATF artifacts (TEMPORARY)
+          if [ -d atf ]; then
+            echo "" >> ../release.txt
+            echo "### ATF build artifacts (for debugging)" >> ../release.txt
+            for f in atf/*; do
+              [ -f "$f" ] || continue
+              sz=$(stat -c %s "$f")
+              md=$(md5sum "$f" | cut -d' ' -f1)
+              echo "- $f (${sz} bytes, md5 ${md})" >> ../release.txt
+            done
+          fi
+
+          cp ../release.txt ./release.txt
           echo "status=success" >> $GITHUB_OUTPUT
 
       - name: Upload firmware to GitHub Release
@@ -245,4 +319,6 @@ jobs:
           body_path: release.txt
           files: |
             ${{ env.FIRMWARE }}/*.bin
+            ${{ env.FIRMWARE }}/atf/*
             openwrt/.config
+            
