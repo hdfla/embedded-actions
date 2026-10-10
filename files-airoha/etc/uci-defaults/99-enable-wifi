@@ -1,7 +1,7 @@
 #!/bin/sh
 # uci-defaults run before WiFi modules finish loading, so /etc/config/wireless
 # may not exist yet. The uci -q commands silently fail if sections don't exist.
-# A hotplug.d/ieee80211/99-enable-wifi script handles the case where WiFi is
+# A hotplug.d/ieee80211/20-enable-wifi script handles the case where WiFi is
 # detected later.
 . /lib/functions.sh
 
