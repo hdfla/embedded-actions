@@ -1,5 +1,5 @@
 #!/bin/sh
-# Fix MT7916 WiFi LED GPIO mux on the EN7523 wireless router.
+# Fix MT7916 WiFi LED GPIO mux.
 #
 # The mt76 driver's mt7915_init_led_mux() writes to MT_LED_GPIO_MUX1
 # (0x70005054) via the PCIe MMIO bus, but this register is outside the
