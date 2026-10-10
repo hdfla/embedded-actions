@@ -6,7 +6,7 @@
 # detected later.
 . /lib/functions.sh
 
-[ "$(board_name)" = "teleq,econet" ] || exit 0
+[ "$(board_name)" = "teleq,xpon" ] || exit 0
 
 # Try to enable if config already exists (from a previous boot or generated early)
 uci -q set wireless.default_radio0.disabled=0
