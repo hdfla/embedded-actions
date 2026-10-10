@@ -7,8 +7,6 @@
 
 . /lib/functions.sh
 
-[ "$(board_name)" = "teleq,econet" ] || exit 0
-
 # Check if we already enabled WiFi (avoid running on every hotplug event)
 [ -f /tmp/.wifi-enabled ] && exit 0
 
@@ -23,8 +21,5 @@ done
 uci -q set wireless.default_radio0.disabled=0
 uci -q set wireless.default_radio1.disabled=0
 uci -q commit wireless
-
-# Reload wireless to bring up the APs
 wifi reload
-
 touch /tmp/.wifi-enabled
