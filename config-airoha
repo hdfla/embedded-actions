@@ -65,7 +65,7 @@ CONFIG_TARGET_airoha_en7523=y
 # CONFIG_TARGET_airoha_en7523_DEVICE_genexis_zephyr is not set
 # CONFIG_TARGET_airoha_en7523_DEVICE_mikrotik_e60iugs is not set
 # CONFIG_TARGET_airoha_en7523_DEVICE_mitrastar_gpt-2742gx4x5v6 is not set
-CONFIG_TARGET_airoha_en7523_DEVICE_teleq_econet=y
+CONFIG_TARGET_airoha_en7523_DEVICE_teleq_xpon=y
 # CONFIG_TARGET_airoha_en7523_DEVICE_tplink_ex530v-v1 is not set
 # CONFIG_TARGET_airoha_en7523_DEVICE_tplink_xx230v-v1 is not set
 
@@ -84,7 +84,7 @@ CONFIG_TARGET_DEVICE_airoha_en7523_DEVICE_genexis_rodimus_r1=n
 CONFIG_TARGET_DEVICE_airoha_en7523_DEVICE_genexis_laxy=n
 CONFIG_TARGET_DEVICE_airoha_en7523_DEVICE_mikrotik_e60iugs=n
 CONFIG_TARGET_DEVICE_airoha_en7523_DEVICE_mitrastar_gpt-2742gx4x5v6=n
-CONFIG_TARGET_DEVICE_airoha_en7523_DEVICE_teleq_econet=n
+CONFIG_TARGET_DEVICE_airoha_en7523_DEVICE_teleq_xpon=n
 CONFIG_TARGET_DEVICE_airoha_en7523_DEVICE_tplink_ex530v-v1=n
 CONFIG_TARGET_DEVICE_airoha_en7523_DEVICE_tplink_xx230v-v1=n
 # end of Target Devices
