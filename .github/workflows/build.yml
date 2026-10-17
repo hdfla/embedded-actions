@@ -98,7 +98,6 @@ jobs:
 
       # ------------------------------------------------------------------
       # AIROHA ONLY: fetch the author's external kernel tree.
-      # This runs before "Custom feeds" so later steps can assume it exists.
       # ------------------------------------------------------------------
       - name: Prepare external Airoha kernel tree
         if: ${{ github.event.inputs.board == 'airoha (an75xx)' }}
@@ -109,19 +108,17 @@ jobs:
           KERNEL_REF="6665dcc1a65b1d00a0e72766f05764756fc2bf9f"
 
           rm -rf "$KERNEL_DIR"
-          git clone --depth 1 "$KERNEL_REPO" "$KERNEL_DIR"
+          git clone "$KERNEL_REPO" "$KERNEL_DIR"
           cd "$KERNEL_DIR"
-          git fetch --depth 1 origin "$KERNEL_REF"
           git checkout "$KERNEL_REF"
 
-          # Force a pure-numeric version. APK refuses anything else, and
-          # EXTRAVERSION such as "-dirty" or a git-describe suffix leaks
+          # Force a pure-numeric version. APK rejects anything else, and
+          # EXTRAVERSION (e.g. -dirty or a git-describe suffix) leaks
           # straight into kmod-* package versions.
           sed -i -E 's/^(EXTRAVERSION[[:space:]]*=).*/\1/' Makefile
           echo "===== Kernel Makefile version ====="
           grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION)' Makefile
 
-          # Hard requirement for the subsequent .config rewrite.
           grep -qE '^VERSION[[:space:]]*='      Makefile
           grep -qE '^PATCHLEVEL[[:space:]]*='   Makefile
           grep -qE '^SUBLEVEL[[:space:]]*='     Makefile
@@ -208,10 +205,10 @@ jobs:
             KERNEL_DIR="${{ github.workspace }}/airoha_kernel"
             echo "Rewriting .config for external kernel tree: $KERNEL_DIR"
 
-            sed -i '/^CONFIG_KERNEL_GIT_CLONE_URI=/d'    .config || true
-            sed -i '/^CONFIG_KERNEL_GIT_REF=/d'          .config || true
+            sed -i '/^CONFIG_KERNEL_GIT_CLONE_URI=/d' .config || true
+            sed -i '/^CONFIG_KERNEL_GIT_REF=/d'       .config || true
             sed -i '/^# CONFIG_EXTERNAL_KERNEL_TREE is not set/d' .config || true
-            sed -i '/^CONFIG_EXTERNAL_KERNEL_TREE=/d'    .config || true
+            sed -i '/^CONFIG_EXTERNAL_KERNEL_TREE=/d' .config || true
 
             {
               echo 'CONFIG_DEVEL=y'
@@ -224,26 +221,15 @@ jobs:
           make defconfig
           grep -q "CONFIG_TARGET" .config || { echo "Error: .config invalid (no CONFIG_TARGET)"; exit 1; }
 
-          # Sanity-check: airoha must end up with external kernel tree set.
           if [ "${{ github.event.inputs.board }}" = "airoha (an75xx)" ]; then
             if ! grep -q '^CONFIG_EXTERNAL_KERNEL_TREE="' .config; then
               echo "FATAL: CONFIG_EXTERNAL_KERNEL_TREE did not survive defconfig"
-              grep -n 'EXTERNAL_KERNEL_TREE\|KERNEL_GIT' .config || true
+              grep -n 'EXTERNAL_KERNEL_TREE\|KERNEL_GIT\|LINUX_VERSION' .config || true
               exit 1
             fi
             grep -n 'EXTERNAL_KERNEL_TREE\|KERNEL_GIT\|LINUX_VERSION' .config || true
           fi
           echo ".config is valid."
-
-      # ------------------------------------------------------------------
-      # AIROHA ONLY: make sure a stale gpio-button-hotplug build dir from a
-      # previous (git-clone) attempt is not reused with a polluted version.
-      # ------------------------------------------------------------------
-      - name: Airoha: clean stale kmod package
-        if: ${{ github.event.inputs.board == 'airoha (an75xx)' }}
-        run: |
-          cd openwrt
-          make package/kernel/gpio-button-hotplug/clean || true
 
       - name: Build firmware
         run: |
@@ -329,39 +315,44 @@ jobs:
       - name: Generate release tag and notes
         id: tag
         run: |
-          echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
-          cat > release.txt << EOF
-          ## OpenWrt Release $(date +"%Y.%m.%d-%H:%M")
-          - Repository: ${{ github.event.inputs.variant }}
-          - Branch: ${{ github.event.inputs.branch }}
-          - Board: ${{ github.event.inputs.board }}
-          - Hostname: ${{ github.event.inputs.hostname }}
-          - IP: ${{ github.event.inputs.default_ip }}
-          - Theme: ${{ github.event.inputs.luci_theme }}
-          - Firmware files:
-          EOF
-          cd ${{ env.FIRMWARE }}
+          echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> "$GITHUB_OUTPUT"
+
+          RELEASE_FILE="$RUNNER_TEMP/release.txt"
+          {
+            echo "## OpenWrt Release $(date +"%Y.%m.%d-%H:%M")"
+            echo "- Repository: ${{ github.event.inputs.variant }}"
+            echo "- Branch: ${{ github.event.inputs.branch }}"
+            echo "- Board: ${{ github.event.inputs.board }}"
+            echo "- Hostname: ${{ github.event.inputs.hostname }}"
+            echo "- IP: ${{ github.event.inputs.default_ip }}"
+            echo "- Theme: ${{ github.event.inputs.luci_theme }}"
+            echo "- Firmware files:"
+          } > "$RELEASE_FILE"
+
+          cd "$FIRMWARE"
           for f in *.bin; do
-            echo "- $f" >> ../release.txt
-            echo "  - md5: $(md5sum "$f" | cut -d' ' -f1)" >> ../release.txt
+            echo "- $f" >> "$RELEASE_FILE"
+            echo "  - md5: $(md5sum "$f" | cut -d' ' -f1)" >> "$RELEASE_FILE"
           done
           if [ -f sha256sums ]; then
-            echo "  - sha256: $(grep -oE '\w{64}' sha256sums | head -1)" >> ../release.txt
+            echo "  - sha256: $(grep -oE '\w{64}' sha256sums | head -1)" >> "$RELEASE_FILE"
           fi
 
           if [ -d atf ]; then
-            echo "" >> ../release.txt
-            echo "### ATF build artifacts (for debugging)" >> ../release.txt
+            {
+              echo ""
+              echo "### ATF build artifacts (for debugging)"
+            } >> "$RELEASE_FILE"
             for f in atf/*; do
               [ -f "$f" ] || continue
               sz=$(stat -c %s "$f")
               md=$(md5sum "$f" | cut -d' ' -f1)
-              echo "- $f (${sz} bytes, md5 ${md})" >> ../release.txt
+              echo "- $f (${sz} bytes, md5 ${md})" >> "$RELEASE_FILE"
             done
           fi
 
-          cp ../release.txt ./release.txt
-          echo "status=success" >> $GITHUB_OUTPUT
+          cp "$RELEASE_FILE" ./release.txt
+          echo "status=success" >> "$GITHUB_OUTPUT"
 
       - name: Upload firmware to GitHub Release
         uses: softprops/action-gh-release@v1
