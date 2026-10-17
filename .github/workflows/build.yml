@@ -31,6 +31,18 @@ on:
           - honeybee (qca953x)
           - scorpion (qca955x)
           - dragonfly (qcn550x)
+      # ------------------------------------------------------------------
+      # CUSTOM KERNEL SECTION
+      # Leave empty to fall back to the stock OpenWrt flow (kernel.org
+      # tarball + patches). When set to "owner/repo", the latest commit on
+      # the repository's default branch is cloned and used as an external
+      # kernel tree for ANY board.
+      # ------------------------------------------------------------------
+      custom_kernel_repo:
+        description: 'Custom kernel repo (owner/repo). Auto-picks latest default-branch commit. Empty = stock OpenWrt kernel.'
+        required: false
+        type: string
+        default: ''
       hostname:
         description: 'Hostname'
         required: true
@@ -97,20 +109,33 @@ jobs:
           clean: 'false'
 
       # ------------------------------------------------------------------
-      # AIROHA ONLY: fetch the author's external kernel tree.
+      # CUSTOM KERNEL: clone the requested repo at its latest default-branch
+      # commit. Skipped entirely when custom_kernel_repo is empty — the
+      # build then falls back to the stock kernel.org tarball + patches
+      # exactly as before, driven purely by the selected .config.
       # ------------------------------------------------------------------
-      - name: Prepare external Airoha kernel tree
-        if: ${{ github.event.inputs.board == 'airoha (an75xx)' }}
+      - name: Prepare custom kernel tree
+        if: ${{ github.event.inputs.custom_kernel_repo != '' }}
         run: |
           set -e
-          KERNEL_DIR="${{ github.workspace }}/airoha_kernel"
-          KERNEL_REPO="https://github.com/hdfla/airoha_kernel.git"
-          KERNEL_REF="6665dcc1a65b1d00a0e72766f05764756fc2bf9f"
+          KERNEL_DIR="${{ github.workspace }}/custom_kernel"
+          KERNEL_REPO="https://github.com/${{ github.event.inputs.custom_kernel_repo }}.git"
 
           rm -rf "$KERNEL_DIR"
           git clone "$KERNEL_REPO" "$KERNEL_DIR"
           cd "$KERNEL_DIR"
-          git checkout "$KERNEL_REF"
+
+          # "Latest upstream branch" == the default branch HEAD we just cloned.
+          KERNEL_COMMIT=$(git rev-parse HEAD)
+          KERNEL_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+          echo "Custom kernel : ${{ github.event.inputs.custom_kernel_repo }}"
+          echo "Branch        : ${KERNEL_BRANCH}"
+          echo "Commit        : ${KERNEL_COMMIT}"
+
+          echo "CUSTOM_KERNEL_REPO=${{ github.event.inputs.custom_kernel_repo }}" >> $GITHUB_ENV
+          echo "CUSTOM_KERNEL_COMMIT=${KERNEL_COMMIT}" >> $GITHUB_ENV
+          echo "CUSTOM_KERNEL_BRANCH=${KERNEL_BRANCH}" >> $GITHUB_ENV
 
           # Force a pure-numeric version. APK rejects anything else, and
           # EXTRAVERSION (e.g. -dirty or a git-describe suffix) leaks
@@ -197,18 +222,22 @@ jobs:
           echo "Using config: $CONFIG_FILE"
 
           # ----------------------------------------------------------------
-          # AIROHA ONLY: switch .config from git-clone kernel to external
-          # kernel tree. Otherwise LINUX_VERSION gets contaminated with the
-          # git ref and APK rejects every kmod-* package.
+          # CUSTOM KERNEL (any board, only when requested): switch .config
+          # from the stock CONFIG_KERNEL_GIT_CLONE_URI path to an external
+          # kernel tree so LINUX_VERSION stays pure-numeric and APK accepts
+          # every kmod-*. With no custom_kernel_repo, .config is untouched
+          # and OpenWrt builds the stock kernel + patches as usual.
           # ----------------------------------------------------------------
-          if [ "${{ github.event.inputs.board }}" = "airoha (an75xx)" ]; then
-            KERNEL_DIR="${{ github.workspace }}/airoha_kernel"
+          if [ -n "${{ github.event.inputs.custom_kernel_repo }}" ]; then
+            KERNEL_DIR="${{ github.workspace }}/custom_kernel"
             echo "Rewriting .config for external kernel tree: $KERNEL_DIR"
 
             sed -i '/^CONFIG_KERNEL_GIT_CLONE_URI=/d' .config || true
             sed -i '/^CONFIG_KERNEL_GIT_REF=/d'       .config || true
             sed -i '/^# CONFIG_EXTERNAL_KERNEL_TREE is not set/d' .config || true
             sed -i '/^CONFIG_EXTERNAL_KERNEL_TREE=/d' .config || true
+            sed -i '/^CONFIG_DEVEL=/d'                .config || true
+            sed -i '/^# CONFIG_DEVEL is not set/d'    .config || true
 
             {
               echo 'CONFIG_DEVEL=y'
@@ -221,7 +250,7 @@ jobs:
           make defconfig
           grep -q "CONFIG_TARGET" .config || { echo "Error: .config invalid (no CONFIG_TARGET)"; exit 1; }
 
-          if [ "${{ github.event.inputs.board }}" = "airoha (an75xx)" ]; then
+          if [ -n "${{ github.event.inputs.custom_kernel_repo }}" ]; then
             if ! grep -q '^CONFIG_EXTERNAL_KERNEL_TREE="' .config; then
               echo "FATAL: CONFIG_EXTERNAL_KERNEL_TREE did not survive defconfig"
               grep -n 'EXTERNAL_KERNEL_TREE\|KERNEL_GIT\|LINUX_VERSION' .config || true
@@ -248,6 +277,19 @@ jobs:
           cd openwrt/bin/targets/*/*
           rm -rf packages
           echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+
+      - name: List firmware files
+        run: |
+          cd "$FIRMWARE"
+          echo "===== Firmware directory contents ====="
+          ls -la
+          echo ""
+          echo "===== File summary ====="
+          for ext in bin fip itb; do
+            count=$(ls -1 *.$ext 2>/dev/null | wc -l)
+            echo "  *.$ext : ${count} file(s)"
+            ls -1 *.$ext 2>/dev/null || true
+          done
 
       - name: Collect ATF build artifacts
         run: |
@@ -305,12 +347,19 @@ jobs:
         with:
           name: openwrt-firmware
           path: openwrt/bin/targets/
+          if-no-files-found: warn
 
       - name: Upload firmware with timestamped name
         uses: actions/upload-artifact@v4
         with:
           name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
-          path: ${{ env.FIRMWARE }}
+          if-no-files-found: warn
+          path: |
+            ${{ env.FIRMWARE }}/*.bin
+            ${{ env.FIRMWARE }}/*.fip
+            ${{ env.FIRMWARE }}/*.itb
+            ${{ env.FIRMWARE }}/atf/*
+            openwrt/.config
 
       - name: Generate release tag and notes
         id: tag
@@ -326,13 +375,21 @@ jobs:
             echo "- Hostname: ${{ github.event.inputs.hostname }}"
             echo "- IP: ${{ github.event.inputs.default_ip }}"
             echo "- Theme: ${{ github.event.inputs.luci_theme }}"
+            if [ -n "${{ github.event.inputs.custom_kernel_repo }}" ]; then
+              echo "- Custom kernel: ${{ github.event.inputs.custom_kernel_repo }} @ ${CUSTOM_KERNEL_BRANCH} (${CUSTOM_KERNEL_COMMIT})"
+            else
+              echo "- Custom kernel: (stock OpenWrt kernel)"
+            fi
             echo "- Firmware files:"
           } > "$RELEASE_FILE"
 
           cd "$FIRMWARE"
-          for f in *.bin; do
-            echo "- $f" >> "$RELEASE_FILE"
-            echo "  - md5: $(md5sum "$f" | cut -d' ' -f1)" >> "$RELEASE_FILE"
+          for ext in bin fip itb; do
+            for f in *.$ext; do
+              [ -f "$f" ] || continue
+              echo "- $f" >> "$RELEASE_FILE"
+              echo "  - md5: $(md5sum "$f" | cut -d' ' -f1)" >> "$RELEASE_FILE"
+            done
           done
           if [ -f sha256sums ]; then
             echo "  - sha256: $(grep -oE '\w{64}' sha256sums | head -1)" >> "$RELEASE_FILE"
@@ -364,5 +421,7 @@ jobs:
           body_path: release.txt
           files: |
             ${{ env.FIRMWARE }}/*.bin
+            ${{ env.FIRMWARE }}/*.fip
+            ${{ env.FIRMWARE }}/*.itb
             ${{ env.FIRMWARE }}/atf/*
             openwrt/.config
