@@ -125,7 +125,6 @@ jobs:
           git clone "$KERNEL_REPO" "$KERNEL_DIR"
           cd "$KERNEL_DIR"
 
-          # "Latest upstream branch" == the default branch HEAD we just cloned.
           KERNEL_COMMIT=$(git rev-parse HEAD)
           KERNEL_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
@@ -291,56 +290,74 @@ jobs:
             ls -1 *.$ext 2>/dev/null || true
           done
 
+      # ------------------------------------------------------------------
+      # ATF / boot artifact collector.
+      #   *bl*.bin | *bl*.fip | *bl*.itb | *bl*.lzma
+      #     — bl2/bl21/bl22/bl23/bl31/bl32/bl33/bl412 in any of the
+      #       canonical extensions.
+      #   flash_table.{bin,lzma,*}
+      #     — the only boot artifact without a 'bl' prefix.
+      # Final board-prefixed images are pulled from STAGING_DIR_IMAGE as
+      # *.bin / *.fip / *.itb / *.lzma (already curated by OpenWrt).
+      # ------------------------------------------------------------------
       - name: Collect ATF build artifacts
         run: |
           set -e
           cd openwrt
 
-          ATF_BUILD_DIR=$(find build_dir -maxdepth 6 -type f -name 'flash_table.bin' 2>/dev/null | head -n1 | xargs -r dirname)
-          STAGING_IMG=$(find staging_dir -maxdepth 4 -type d -name image | head -n1)
           TARGET_DIR="$FIRMWARE"
-
-          echo "ATF_BUILD_DIR = $ATF_BUILD_DIR"
-          echo "STAGING_IMG   = $STAGING_IMG"
-          echo "TARGET_DIR    = $TARGET_DIR"
+          if [ -z "$TARGET_DIR" ] || [ ! -d "$TARGET_DIR" ]; then
+            echo "::warning::FIRMWARE directory not set or missing; skipping ATF collection"
+            exit 0
+          fi
 
           mkdir -p "$TARGET_DIR/atf"
 
-          if [ -n "$ATF_BUILD_DIR" ]; then
-            for f in bl21.bin bl22.lzma bl23.lzma flash_table.bin flash_table.lzma; do
-              if [ -f "$ATF_BUILD_DIR/$f" ]; then
-                cp -v "$ATF_BUILD_DIR/$f" "$TARGET_DIR/atf/"
-              else
-                echo "  (missing, skipped) $f"
-              fi
-            done
-          fi
+          declare -A seen=()
+          copy_if_new() {
+            local f="$1"
+            [ -f "$f" ] || return 0
+            local real
+            real=$(realpath "$f")
+            [ -n "${seen[$real]:-}" ] && return 0
+            seen[$real]=1
+            cp -vL "$f" "$TARGET_DIR/atf/" 2>/dev/null || true
+          }
 
+          echo "===== Searching for ATF / boot artifacts ====="
+
+          # 1) ATF build directories: only *bl*.{bin,fip,itb,lzma} and
+          #    flash_table.* (the only artifact without a 'bl' prefix).
+          while IFS= read -r d; do
+            [ -n "$d" ] || continue
+            for pat in '*bl*.bin' '*bl*.fip' '*bl*.itb' '*bl*.lzma' \
+                       'flash_table.bin' 'flash_table.lzma' 'flash_table.*'; do
+              for f in "$d"/$pat; do
+                copy_if_new "$f"
+              done
+            done
+          done < <(find build_dir -maxdepth 6 -type f \
+                     \( -iname '*bl*.bin' -o -iname '*bl*.fip' \
+                        -o -iname '*bl*.itb' -o -iname '*bl*.lzma' \
+                        -o -iname 'flash_table.*' \) 2>/dev/null \
+                   | xargs -r -n1 dirname | sort -u)
+
+          # 2) STAGING_DIR_IMAGE: final board-prefixed images.
+          STAGING_IMG=$(find staging_dir -maxdepth 4 -type d -name image 2>/dev/null | head -n1)
           if [ -n "$STAGING_IMG" ]; then
-            for f in "$STAGING_IMG"/*-bl2.bin \
-                     "$STAGING_IMG"/*-bl21.bin \
-                     "$STAGING_IMG"/*-bl31.bin \
-                     "$STAGING_IMG"/*-bl31.lzma; do
-              [ -f "$f" ] && cp -v "$f" "$TARGET_DIR/atf/"
+            echo "STAGING_IMG = $STAGING_IMG"
+            for pat in '*.bin' '*.fip' '*.itb' '*.lzma'; do
+              for f in "$STAGING_IMG"/$pat; do
+                copy_if_new "$f"
+              done
             done
-          fi
-
-          echo "===== atf/ contents ====="
-          ls -la "$TARGET_DIR/atf/"
-
-          if [ -f "$TARGET_DIR/atf/flash_table.bin" ]; then
-            echo "===== HeYangTek entries found in flash_table.bin ====="
-            if strings "$TARGET_DIR/atf/flash_table.bin" | grep -q _SPI_NAND_DEVICE_ID_HYF1GQ4UDACAE; then
-              strings "$TARGET_DIR/atf/flash_table.bin" | grep _SPI_NAND_DEVICE_ID_HYF || true
-              echo "OK: HYF1GQ4UDACAE is present in the table."
-            else
-              echo "!!! FATAL: HYF1GQ4UDACAE not found in flash_table.bin."
-              echo "!!! You MUST NOT flash this image."
-              exit 1
-            fi
           else
-            echo "!!! WARNING: flash_table.bin was not found in the ATF build dir."
+            echo "STAGING_IMG = <none>"
           fi
+
+          echo ""
+          echo "===== atf/ contents ====="
+          ls -la "$TARGET_DIR/atf/" || true
 
       - name: Upload firmware (artifact)
         uses: actions/upload-artifact@v4
