@@ -31,15 +31,8 @@ on:
           - honeybee (qca953x)
           - scorpion (qca955x)
           - dragonfly (qcn550x)
-      # ------------------------------------------------------------------
-      # CUSTOM KERNEL SECTION
-      # Leave empty to fall back to the stock OpenWrt flow (kernel.org
-      # tarball + patches). When set to "owner/repo", the latest commit on
-      # the repository's default branch is cloned and used as an external
-      # kernel tree for ANY board.
-      # ------------------------------------------------------------------
       custom_kernel_repo:
-        description: 'Custom kernel repo (owner/repo). Auto-picks latest default-branch commit. Empty = stock OpenWrt kernel.'
+        description: 'Custom kernel repo (owner/repo). Latest default-branch commit. Empty = stock OpenWrt kernel.'
         required: false
         type: string
         default: ''
@@ -108,44 +101,20 @@ jobs:
           ccache: 'false'
           clean: 'false'
 
-      # ------------------------------------------------------------------
-      # CUSTOM KERNEL: clone the requested repo at its latest default-branch
-      # commit. Skipped entirely when custom_kernel_repo is empty — the
-      # build then falls back to the stock kernel.org tarball + patches
-      # exactly as before, driven purely by the selected .config.
-      # ------------------------------------------------------------------
       - name: Prepare custom kernel tree
         if: ${{ github.event.inputs.custom_kernel_repo != '' }}
         run: |
           set -e
-          KERNEL_DIR="${{ github.workspace }}/custom_kernel"
-          KERNEL_REPO="https://github.com/${{ github.event.inputs.custom_kernel_repo }}.git"
+          cd "${{ github.workspace }}"
+          rm -rf custom_kernel
+          git clone --depth 1 "https://github.com/${{ github.event.inputs.custom_kernel_repo }}.git" custom_kernel
+          cd custom_kernel
 
-          rm -rf "$KERNEL_DIR"
-          git clone "$KERNEL_REPO" "$KERNEL_DIR"
-          cd "$KERNEL_DIR"
+          echo "CUSTOM_KERNEL_BRANCH=$(git rev-parse --abbrev-ref HEAD)" >> $GITHUB_ENV
+          echo "CUSTOM_KERNEL_COMMIT=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
-          KERNEL_COMMIT=$(git rev-parse HEAD)
-          KERNEL_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-
-          echo "Custom kernel : ${{ github.event.inputs.custom_kernel_repo }}"
-          echo "Branch        : ${KERNEL_BRANCH}"
-          echo "Commit        : ${KERNEL_COMMIT}"
-
-          echo "CUSTOM_KERNEL_REPO=${{ github.event.inputs.custom_kernel_repo }}" >> $GITHUB_ENV
-          echo "CUSTOM_KERNEL_COMMIT=${KERNEL_COMMIT}" >> $GITHUB_ENV
-          echo "CUSTOM_KERNEL_BRANCH=${KERNEL_BRANCH}" >> $GITHUB_ENV
-
-          # Force a pure-numeric version. APK rejects anything else, and
-          # EXTRAVERSION (e.g. -dirty or a git-describe suffix) leaks
-          # straight into kmod-* package versions.
           sed -i -E 's/^(EXTRAVERSION[[:space:]]*=).*/\1/' Makefile
-          echo "===== Kernel Makefile version ====="
           grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION)' Makefile
-
-          grep -qE '^VERSION[[:space:]]*='      Makefile
-          grep -qE '^PATCHLEVEL[[:space:]]*='   Makefile
-          grep -qE '^SUBLEVEL[[:space:]]*='     Makefile
 
       - name: Custom feeds, packages and files
         run: |
@@ -213,51 +182,24 @@ jobs:
           BOARD="${{ github.event.inputs.board }}"
           BOARD_SHORT=$(echo "$BOARD" | sed -E 's/ *\(.*\)//' | sed 's/ /-/g')
           CONFIG_FILE="../config-${BOARD_SHORT}"
-          if [ ! -f "$CONFIG_FILE" ]; then
-            echo "Error: Config file '$CONFIG_FILE' not found!"
+          [ -f "$CONFIG_FILE" ] || { echo "Error: $CONFIG_FILE not found"; exit 1; }
+          cp "$CONFIG_FILE" .config
+
+          # CUSTOM KERNEL: switch to external tree. Without this, kmod versions
+          # get polluted with git refs and APK rejects them.
+          if [ -n "${{ github.event.inputs.custom_kernel_repo }}" ]; then
+            sed -i '/^CONFIG_KERNEL_GIT_/d; /^CONFIG_EXTERNAL_KERNEL_TREE=/d; /^CONFIG_DEVEL=/d' .config
+            printf 'CONFIG_DEVEL=y\nCONFIG_EXTERNAL_KERNEL_TREE="%s/custom_kernel"\n' \
+              "${{ github.workspace }}" >> .config
+          fi
+
+          make defconfig
+
+          if [ -n "${{ github.event.inputs.custom_kernel_repo }}" ] && ! grep -q '^CONFIG_EXTERNAL_KERNEL_TREE="' .config; then
+            echo "FATAL: CONFIG_EXTERNAL_KERNEL_TREE did not survive defconfig"
+            grep -n 'EXTERNAL_KERNEL_TREE\|KERNEL_GIT' .config || true
             exit 1
           fi
-          cp "$CONFIG_FILE" .config
-          echo "Using config: $CONFIG_FILE"
-
-          # ----------------------------------------------------------------
-          # CUSTOM KERNEL (any board, only when requested): switch .config
-          # from the stock CONFIG_KERNEL_GIT_CLONE_URI path to an external
-          # kernel tree so LINUX_VERSION stays pure-numeric and APK accepts
-          # every kmod-*. With no custom_kernel_repo, .config is untouched
-          # and OpenWrt builds the stock kernel + patches as usual.
-          # ----------------------------------------------------------------
-          if [ -n "${{ github.event.inputs.custom_kernel_repo }}" ]; then
-            KERNEL_DIR="${{ github.workspace }}/custom_kernel"
-            echo "Rewriting .config for external kernel tree: $KERNEL_DIR"
-
-            sed -i '/^CONFIG_KERNEL_GIT_CLONE_URI=/d' .config || true
-            sed -i '/^CONFIG_KERNEL_GIT_REF=/d'       .config || true
-            sed -i '/^# CONFIG_EXTERNAL_KERNEL_TREE is not set/d' .config || true
-            sed -i '/^CONFIG_EXTERNAL_KERNEL_TREE=/d' .config || true
-            sed -i '/^CONFIG_DEVEL=/d'                .config || true
-            sed -i '/^# CONFIG_DEVEL is not set/d'    .config || true
-
-            {
-              echo 'CONFIG_DEVEL=y'
-              echo "CONFIG_EXTERNAL_KERNEL_TREE=\"$KERNEL_DIR\""
-            } >> .config
-          fi
-
-          echo "Current .config (first 30 lines):"
-          head -30 .config
-          make defconfig
-          grep -q "CONFIG_TARGET" .config || { echo "Error: .config invalid (no CONFIG_TARGET)"; exit 1; }
-
-          if [ -n "${{ github.event.inputs.custom_kernel_repo }}" ]; then
-            if ! grep -q '^CONFIG_EXTERNAL_KERNEL_TREE="' .config; then
-              echo "FATAL: CONFIG_EXTERNAL_KERNEL_TREE did not survive defconfig"
-              grep -n 'EXTERNAL_KERNEL_TREE\|KERNEL_GIT\|LINUX_VERSION' .config || true
-              exit 1
-            fi
-            grep -n 'EXTERNAL_KERNEL_TREE\|KERNEL_GIT\|LINUX_VERSION' .config || true
-          fi
-          echo ".config is valid."
 
       - name: Build firmware
         run: |
@@ -267,9 +209,6 @@ jobs:
           echo "DEVICE_NAME=_${{ github.event.inputs.board }}" >> $GITHUB_ENV
           echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
-      - name: Check space usage
-        run: df -hT
-
       - name: Organize files
         id: organize
         run: |
@@ -277,87 +216,26 @@ jobs:
           rm -rf packages
           echo "FIRMWARE=$PWD" >> $GITHUB_ENV
 
-      - name: List firmware files
-        run: |
-          cd "$FIRMWARE"
-          echo "===== Firmware directory contents ====="
-          ls -la
-          echo ""
-          echo "===== File summary ====="
-          for ext in bin fip itb; do
-            count=$(ls -1 *.$ext 2>/dev/null | wc -l)
-            echo "  *.$ext : ${count} file(s)"
-            ls -1 *.$ext 2>/dev/null || true
-          done
-
-      # ------------------------------------------------------------------
-      # ATF / boot artifact collector.
-      #   *bl*.bin | *bl*.fip | *bl*.itb | *bl*.lzma
-      #     — bl2/bl21/bl22/bl23/bl31/bl32/bl33/bl412 in any of the
-      #       canonical extensions.
-      #   flash_table.{bin,lzma,*}
-      #     — the only boot artifact without a 'bl' prefix.
-      # Final board-prefixed images are pulled from STAGING_DIR_IMAGE as
-      # *.bin / *.fip / *.itb / *.lzma (already curated by OpenWrt).
-      # ------------------------------------------------------------------
       - name: Collect ATF build artifacts
         run: |
           set -e
           cd openwrt
+          mkdir -p "$FIRMWARE/atf"
 
-          TARGET_DIR="$FIRMWARE"
-          if [ -z "$TARGET_DIR" ] || [ ! -d "$TARGET_DIR" ]; then
-            echo "::warning::FIRMWARE directory not set or missing; skipping ATF collection"
-            exit 0
-          fi
-
-          mkdir -p "$TARGET_DIR/atf"
-
-          declare -A seen=()
-          copy_if_new() {
-            local f="$1"
-            [ -f "$f" ] || return 0
-            local real
-            real=$(realpath "$f")
-            [ -n "${seen[$real]:-}" ] && return 0
-            seen[$real]=1
-            cp -vL "$f" "$TARGET_DIR/atf/" 2>/dev/null || true
-          }
-
-          echo "===== Searching for ATF / boot artifacts ====="
-
-          # 1) ATF build directories: only *bl*.{bin,fip,itb,lzma} and
-          #    flash_table.* (the only artifact without a 'bl' prefix).
-          while IFS= read -r d; do
-            [ -n "$d" ] || continue
-            for pat in '*bl*.bin' '*bl*.fip' '*bl*.itb' '*bl*.lzma' \
-                       'flash_table.bin' 'flash_table.lzma' 'flash_table.*'; do
-              for f in "$d"/$pat; do
-                copy_if_new "$f"
-              done
-            done
-          done < <(find build_dir -maxdepth 6 -type f \
-                     \( -iname '*bl*.bin' -o -iname '*bl*.fip' \
-                        -o -iname '*bl*.itb' -o -iname '*bl*.lzma' \
-                        -o -iname 'flash_table.*' \) 2>/dev/null \
-                   | xargs -r -n1 dirname | sort -u)
-
-          # 2) STAGING_DIR_IMAGE: final board-prefixed images.
           STAGING_IMG=$(find staging_dir -maxdepth 4 -type d -name image 2>/dev/null | head -n1)
           if [ -n "$STAGING_IMG" ]; then
-            echo "STAGING_IMG = $STAGING_IMG"
-            for pat in '*.bin' '*.fip' '*.itb' '*.lzma'; do
-              for f in "$STAGING_IMG"/$pat; do
-                copy_if_new "$f"
-              done
+            for ext in bin fip itb lzma; do
+              cp -vL "$STAGING_IMG"/*.$ext "$FIRMWARE/atf/" 2>/dev/null || true
             done
-          else
-            echo "STAGING_IMG = <none>"
           fi
 
-          echo ""
-          echo "===== atf/ contents ====="
-          ls -la "$TARGET_DIR/atf/" || true
+          find build_dir -maxdepth 6 -type f \
+            \( -iname '*bl*.bin' -o -iname '*bl*.fip' -o -iname '*bl*.itb' -o -iname '*bl*.lzma' \
+               -o -iname 'flash_table.*' \) \
+            -exec cp -vL {} "$FIRMWARE/atf/" \;
+
+          echo "===== atf/ ====="
+          ls -la "$FIRMWARE/atf/"
 
       - name: Upload firmware (artifact)
         uses: actions/upload-artifact@v4
@@ -382,8 +260,8 @@ jobs:
         id: tag
         run: |
           echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> "$GITHUB_OUTPUT"
-
           RELEASE_FILE="$RUNNER_TEMP/release.txt"
+
           {
             echo "## OpenWrt Release $(date +"%Y.%m.%d-%H:%M")"
             echo "- Repository: ${{ github.event.inputs.variant }}"
@@ -413,15 +291,10 @@ jobs:
           fi
 
           if [ -d atf ]; then
-            {
-              echo ""
-              echo "### ATF build artifacts (for debugging)"
-            } >> "$RELEASE_FILE"
+            { echo ""; echo "### ATF build artifacts (for debugging)"; } >> "$RELEASE_FILE"
             for f in atf/*; do
               [ -f "$f" ] || continue
-              sz=$(stat -c %s "$f")
-              md=$(md5sum "$f" | cut -d' ' -f1)
-              echo "- $f (${sz} bytes, md5 ${md})" >> "$RELEASE_FILE"
+              echo "- $f ($(stat -c %s "$f") bytes, md5 $(md5sum "$f" | cut -d' ' -f1))" >> "$RELEASE_FILE"
             done
           fi
 
