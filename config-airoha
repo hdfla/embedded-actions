@@ -8913,5 +8913,6 @@ CONFIG_PACKAGE_https_dns_proxy=y
 CONFIG_PACKAGE_luci-app-https-dns-proxy=y
 CONFIG_PACKAGE_adguardhome=n
 CONFIG_PACKAGE_nfqws=n
+CONFIG_PACKAGE_dnsmasq=y
 CONFIG_PACKAGE_luci-app-zapret2=n
 CONFIG_PACKAGE_kmod-mtd-rw=y
