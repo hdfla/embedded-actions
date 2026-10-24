@@ -73,13 +73,13 @@ CONFIG_TARGET_MULTI_PROFILE=y
 # CONFIG_TARGET_airoha_en7523_DEVICE_mitrastar_gpt-2742gx4x5v6 is not set
 # CONFIG_TARGET_airoha_en7523_DEVICE_tplink_ex530v-v1 is not set
 # CONFIG_TARGET_airoha_en7523_DEVICE_tplink_xx230v-v1 is not set
-# CONFIG_TARGET_airoha_en7523_DEVICE_teleq_xpon is not set
+CONFIG_TARGET_airoha_en7523_DEVICE_teleq_xpon=y
 
 #
 # Target Devices
 #
-CONFIG_TARGET_ALL_PROFILES=y
-CONFIG_TARGET_PER_DEVICE_ROOTFS=y
+# CONFIG_TARGET_ALL_PROFILES is not set
+# CONFIG_TARGET_PER_DEVICE_ROOTFS is not set
 CONFIG_TARGET_DEVICE_airoha_en7523_DEVICE_airoha_en7523-evb=n
 CONFIG_TARGET_DEVICE_airoha_en7523_DEVICE_askey_rtf8225vw=n
 CONFIG_TARGET_DEVICE_airoha_en7523_DEVICE_genexis_arcee=n
@@ -94,7 +94,7 @@ CONFIG_TARGET_DEVICE_airoha_en7523_DEVICE_mikrotik_e62iugs-2axd5axt=n
 CONFIG_TARGET_DEVICE_airoha_en7523_DEVICE_mitrastar_gpt-2742gx4x5v6=n
 CONFIG_TARGET_DEVICE_airoha_en7523_DEVICE_tplink_ex530v-v1=n
 CONFIG_TARGET_DEVICE_airoha_en7523_DEVICE_tplink_xx230v-v1=n
-CONFIG_TARGET_DEVICE_airoha_en7523_DEVICE_teleq_xpon=y
+CONFIG_TARGET_DEVICE_airoha_en7523_DEVICE_teleq_xpon=n
 # end of Target Devices
 
 CONFIG_HAS_SUBTARGETS=y
