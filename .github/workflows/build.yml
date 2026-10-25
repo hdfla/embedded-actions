@@ -203,10 +203,9 @@ jobs:
       - name: Build firmware
         run: |
           cd openwrt
-          DEBUG="${{ github.event.inputs.verbosity == 'Yes' && 'V=s' || '' }}"
-          make -j$(nproc) $DEBUG
-          echo "DEVICE_NAME=_${{ github.event.inputs.board }}" >> $GITHUB_ENV
-          echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+          make -j$(nproc) ${{ github.event.inputs.verbosity == 'Yes' && 'V=s' || '' }}
+          BOARD=$(tr -cs A-Za-z0-9 - <<< '${{ github.event.inputs.board }}' | sed 's/^-//;s/-$//')
+          echo "DEVICE_NAME=_$BOARD" >> "$GITHUB_ENV"; echo "FILE_DATE=_$(date +%Y%m%d%H%M)" >> "$GITHUB_ENV"
 
       - name: Organize files
         id: organize
@@ -258,12 +257,12 @@ jobs:
       - name: Generate release tag and notes
         id: tag
         run: |
-          echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> "$GITHUB_OUTPUT"
-          RELEASE_FILE="$RUNNER_TEMP/release.txt"
+          echo "release_tag=$(date +%Y.%m.%d-%H%M)" >> "$GITHUB_OUTPUT"
+          NOTES=$RUNNER_TEMP/release.txt
 
           {
-            echo "## OpenWrt Release $(date +"%Y.%m.%d-%H:%M")"
-            echo "- Repository: ${{ github.event.inputs.variant }}"
+            echo "## OpenWrt $(date +%Y.%m.%d-%H:%M)"
+            echo "- Repo: ${{ github.event.inputs.variant }}"
             echo "- Branch: ${{ github.event.inputs.branch }}"
             echo "- Board: ${{ github.event.inputs.board }}"
             echo "- Hostname: ${{ github.event.inputs.hostname }}"
@@ -272,32 +271,25 @@ jobs:
             if [ -n "${{ github.event.inputs.custom_kernel_repo }}" ]; then
               echo "- Custom kernel: ${{ github.event.inputs.custom_kernel_repo }} @ ${CUSTOM_KERNEL_BRANCH} (${CUSTOM_KERNEL_COMMIT})"
             else
-              echo "- Custom kernel: (stock OpenWrt kernel)"
+              echo "- Custom kernel: stock OpenWrt kernel"
             fi
-            echo "- Firmware files:"
-          } > "$RELEASE_FILE"
+            echo
+            echo "### Files"
+          } > "$NOTES"
 
           cd "$FIRMWARE"
-          for ext in bin fip itb; do
-            for f in *.$ext; do
-              [ -f "$f" ] || continue
-              echo "- $f" >> "$RELEASE_FILE"
-              echo "  - md5: $(md5sum "$f" | cut -d' ' -f1)" >> "$RELEASE_FILE"
-            done
+          for f in *.bin *.fip *.itb atf/*; do
+            [ -f "$f" ] || continue
+            printf -- '- %s\n  - md5: %s\n  - sha256: %s\n' "$f" \
+              "$(md5sum "$f" | cut -d' ' -f1)" \
+              "$(sha256sum "$f" | cut -d' ' -f1)" >> "$NOTES"
           done
+
           if [ -f sha256sums ]; then
-            echo "  - sha256: $(grep -oE '\w{64}' sha256sums | head -1)" >> "$RELEASE_FILE"
+            { echo; echo '### sha256sums'; echo '```'; cat sha256sums; echo '```'; } >> "$NOTES"
           fi
 
-          if [ -d atf ]; then
-            { echo ""; echo "### ATF build artifacts (for debugging)"; } >> "$RELEASE_FILE"
-            for f in atf/*; do
-              [ -f "$f" ] || continue
-              echo "- $f ($(stat -c %s "$f") bytes, md5 $(md5sum "$f" | cut -d' ' -f1))" >> "$RELEASE_FILE"
-            done
-          fi
-
-          cp "$RELEASE_FILE" ./release.txt
+          cp "$NOTES" "$GITHUB_WORKSPACE/release.txt"
           echo "status=success" >> "$GITHUB_OUTPUT"
 
       - name: Upload firmware to GitHub Release
