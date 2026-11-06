@@ -8931,6 +8931,7 @@ CONFIG_PACKAGE_uboot-envtools=y
 CONFIG_PACKAGE_wpa-supplicant-mbedtls=y
 CONFIG_PACKAGE_wpad-mbedtls=y
 CONFIG_PACKAGE_yafut=y
+CONFIG_AIROHA_XPON_V1=y
 
 #
 # Custom Configs
