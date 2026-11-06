@@ -94,13 +94,13 @@ jobs:
           token: ${{ secrets.OWRTPAT }}
           fetch-depth: 1
 
-      - name: Cache OpenWrt build (cachewrtbu ild)
+      - name: Cache OpenWrt build (cachewrtbuild)
         uses: stupidloud/cachewrtbuild@main
         with:
           prefix: ${{ github.workspace }}/openwrt
           mixkey: ${{ github.event.inputs.board }}
           ccache: 'false'
-        clean: 'false'
+          clean: 'false'
 
       - name: Prepare custom kernel tree
         if: ${{ github.event.inputs.custom_kernel_repo != '' }}
