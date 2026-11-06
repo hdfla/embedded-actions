@@ -261,17 +261,14 @@ jobs:
 
           {
             echo "## OpenWrt $(date +%Y.%m.%d-%H:%M)"
-            echo "- Repo: ${{ github.event.inputs.variant }}"
-            echo "- Branch: ${{ github.event.inputs.branch }}"
             echo "- Board: ${{ github.event.inputs.board }}"
+            echo "- Repo: ${{ github.event.inputs.variant }}"
+            if [ -n "${{ github.event.inputs.custom_kernel_repo }}" ]; then
+              echo "- Kernel: ${{ github.event.inputs.custom_kernel_repo }} @ ${CUSTOM_KERNEL_BRANCH} (${CUSTOM_KERNEL_COMMIT})"
+            fi
             echo "- Hostname: ${{ github.event.inputs.hostname }}"
             echo "- IP: ${{ github.event.inputs.default_ip }}"
             echo "- Theme: ${{ github.event.inputs.luci_theme }}"
-            if [ -n "${{ github.event.inputs.custom_kernel_repo }}" ]; then
-              echo "- Custom kernel: ${{ github.event.inputs.custom_kernel_repo }} @ ${CUSTOM_KERNEL_BRANCH} (${CUSTOM_KERNEL_COMMIT})"
-            else
-              echo "- Custom kernel: stock OpenWrt kernel"
-            fi
             echo
           } > "$NOTES"
 
