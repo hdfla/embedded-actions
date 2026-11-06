@@ -190,12 +190,10 @@ jobs:
       - name: Collect ATF artifacts
         run: |
           cd openwrt
-          fw=$(echo bin/targets/*/*)
-          mkdir -p "$fw/atf"
-          img=$(find staging_dir -maxdepth 4 -type d -name image | head -n1)
-          [ -n "$img" ] && cp -vL "$img"/*.{bin,fip,itb,lzma} "$fw/atf/" 2>/dev/null
-          find build_dir -maxdepth 6 -type f \
-            \( -iname '*bl*.*' -o -iname 'flash_table.*' \) -exec cp -vL -t "$fw/atf/" {} +
+          fw=$(echo bin/targets/*/*)/atf
+          mkdir -p "$fw"
+          find staging_dir -path '*/image/*' -type f \( -name '*.bin' -o -name '*.fip' -o -name '*.itb' -o -name '*.lzma' \) -exec cp -vLt "$fw" {} + || true
+          find build_dir -maxdepth 6 -type f \( -iname '*bl*.bin' -o -iname '*bl*.fip' -o -iname '*bl*.itb' -o -iname '*bl*.lzma' -o -iname 'flash_table.*' \) -exec cp -vLt "$fw" {} + || true
 
       - name: Generate release notes
         id: notes
