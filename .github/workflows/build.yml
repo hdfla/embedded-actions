@@ -1,3 +1,4 @@
+run-name: Build ${{ inputs.board }} - ${{ github.run_number }} (${{ github.run_id }}) - Actor ${{ github.actor || 'Unknown' }}
 name: Build image
 
 on:
@@ -5,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       board:
-        description: 'Board (used for config selection and cache key)'
+        description: 'Board (config selection + cache key)'
         required: true
         type: choice
         default: 'filogic (mt798x)'
@@ -64,137 +65,119 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-26.04
+    name: Build OpenWrt
+    runs-on: ubuntu-latest
+    env:
+      OPENWRT_DIR: ${{ github.workspace }}/openwrt
+      verbose: ${{ inputs.verbosity == 'Yes' && 's' || '' }}
+      CUSTOM_KERNEL: ${{ inputs.custom_kernel_repo }}
+      ARTIFACTS: |
+        ${{ github.workspace }}/openwrt/bin/targets/*/*/*.bin
+        ${{ github.workspace }}/openwrt/bin/targets/*/*/*.fip
+        ${{ github.workspace }}/openwrt/bin/targets/*/*/*.itb
+        ${{ github.workspace }}/openwrt/bin/targets/*/*/atf/*
+        ${{ github.workspace }}/openwrt/.config
     steps:
-      - name: Checkout your repository
+      - name: Parse inputs
+        id: parse
+        run: |
+          board='${{ inputs.board }}'
+          echo "board_short=${board%% (*}" >> "$GITHUB_OUTPUT"
+          read -r repo ref <<< '${{ inputs.variant }}'
+          echo "repo=$repo" >> "$GITHUB_OUTPUT"
+          echo "ref=${ref:-main}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout config repo
         uses: actions/checkout@v6
 
-      - name: Set up build dependencies
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/google/chrome /opt/microsoft/msedge /opt/microsoft/powershell /opt/pipx /usr/lib/mono /usr/local/julia* /usr/local/lib/node_modules /usr/local/share/chromium /usr/local/share/powershell /usr/share/swift
-          sudo -E apt-get -qq update
-          sudo -E apt-get -qq install bzip2 g++ gawk gcc git glibc-source libncurses-dev make
-          sudo apt update
-          sudo -E apt-get -qq autoremove --purge
-          sudo -E apt-get -qq clean
-
-      - name: Parse OpenWrt repo spec
-        id: ow
-        run: |
-          read -r REPO REF <<< '${{ github.event.inputs.variant }}'
-          echo "repo=$REPO" >> "$GITHUB_OUTPUT"
-          echo "ref=${REF:-main}" >> "$GITHUB_OUTPUT"
-
-      - name: Clone OpenWrt source
+      - name: OpenWrt source
         uses: actions/checkout@v6
         with:
-          repository: ${{ steps.ow.outputs.repo }}
-          ref: ${{ steps.ow.outputs.ref }}
+          repository: ${{ steps.parse.outputs.repo }}
+          ref: ${{ steps.parse.outputs.ref }}
           path: openwrt
           token: ${{ secrets.OWRTPAT }}
           fetch-depth: 1
 
-      - name: Cache OpenWrt build (cachewrtbuild)
+      - name: Restore build cache
         uses: stupidloud/cachewrtbuild@main
         with:
-          prefix: ${{ github.workspace }}/openwrt
-          mixkey: ${{ github.event.inputs.board }}
+          prefix: ${{ env.OPENWRT_DIR }}
+          mixkey: ${{ inputs.board }}
           ccache: 'false'
           clean: 'false'
 
+      - name: Install host dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            build-essential clang flex bison g++ gawk gettext git \
+            libncurses-dev libssl-dev python3-setuptools rsync swig unzip zlib1g-dev \
+            file wget ccache gcc-multilib g++-multilib
+
+      - name: Free disk space on runner
+        run: |
+          sudo rm -rf \
+            /opt/ghc /opt/google/chrome /opt/microsoft/msedge /opt/microsoft/powershell \
+            /opt/pipx /usr/lib/mono /usr/local/julia* /usr/local/lib/android \
+            /usr/local/lib/node_modules /usr/local/share/chromium /usr/local/share/powershell \
+            /usr/share/dotnet /usr/share/swift
+          df -h
+          free -h
+
       - name: Prepare custom kernel tree
-        if: ${{ github.event.inputs.custom_kernel_repo != '' }}
+        if: ${{ inputs.custom_kernel_repo != '' }}
         run: |
-          set -e
-          read -r REPO REF <<< '${{ github.event.inputs.custom_kernel_repo }}'
-          git clone --depth 1 ${REF:+--branch "$REF"} "https://github.com/$REPO.git" custom_kernel
-          cd custom_kernel
-          echo "CUSTOM_KERNEL_BRANCH=$(git rev-parse --abbrev-ref HEAD)" >> $GITHUB_ENV
-          echo "CUSTOM_KERNEL_COMMIT=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
-          sed -i -E 's/^(EXTRAVERSION[[:space:]]*=).*/\1/' Makefile
-          grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION)' Makefile
+          read -r k_repo k_ref <<< "$CUSTOM_KERNEL"
+          git clone --depth 1 ${k_ref:+--branch "$k_ref"} "https://github.com/$k_repo.git" custom_kernel
+          echo "CUSTOM_KERNEL_BRANCH=$(git -C custom_kernel rev-parse --abbrev-ref HEAD)" >> "$GITHUB_ENV"
+          echo "CUSTOM_KERNEL_COMMIT=$(git -C custom_kernel rev-parse --short HEAD)" >> "$GITHUB_ENV"
+          sed -i -E 's/^(EXTRAVERSION[[:space:]]*=).*/\1/' custom_kernel/Makefile
 
-      - name: Custom feeds, packages and files
+      - name: Apply feeds, packages and files overlay
         run: |
-          set -e
           cd openwrt
+          bs='${{ steps.parse.outputs.board_short }}'
 
-          BOARD="${{ github.event.inputs.board }}"
-          BOARD_SHORT=$(echo "$BOARD" | sed -E 's/ *\(.*\)//' | sed 's/ /-/g')
-          echo "Board short name: $BOARD_SHORT"
-
-          FEEDS_FILE="../feeds-${BOARD_SHORT}"
-          if [ -f "$FEEDS_FILE" ]; then
-            cp "$FEEDS_FILE" feeds.conf
-            echo "Using $FEEDS_FILE -> feeds.conf"
-          else
-            echo "No $FEEDS_FILE found, keeping source default feeds.conf"
-          fi
+          [ -f "../feeds-$bs" ] && cp "../feeds-$bs" feeds.conf
 
           if [ -f ../packages ]; then
             mkdir -p package
-            while read url; do
-              [ -z "$url" ] && continue
-              folder="${url##*/}"; folder="${folder%.git}"
-              git clone "$url" "package/$folder"
-              echo "Cloned $folder"
-            done < ../packages
+            xargs -r -n1 git -C package clone < ../packages
           fi
 
-          FILES_DIR="../files-${BOARD_SHORT}"
-          if [ -d "$FILES_DIR" ]; then
-            cp -r "$FILES_DIR" files
-            echo "Using $FILES_DIR -> files/ overlay"
-          elif [ -d ../files ]; then
-            cp -r ../files files
-            echo "Using ../files -> files/ overlay"
-          else
-            echo "No files/ overlay found (checked $FILES_DIR and ../files)"
-          fi
+          for d in "../files-$bs" ../files; do
+            [ -d "$d" ] && { cp -r "$d" files; break; }
+          done
 
-      - name: Update feeds
+      - name: Update and install feeds
         run: |
           cd openwrt
           git config --global url."https://x-access-token:${{ secrets.KNFLPAT }}@github.com/hdfla/embedded-files".insteadOf "https://github.com/hdfla/embedded-files"
-          ./scripts/feeds update -a && ./scripts/feeds install -a
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
 
       - name: Apply personalization
         run: |
           cd openwrt
-          NEW_IP="${{ github.event.inputs.default_ip }}"
-          OLD_IP_PATTERN='192.168.[0-9]\{1,3\}.1'
-          sed -i "s/$OLD_IP_PATTERN/$NEW_IP/g" package/base-files/files/bin/config_generate
-
-          HOSTNAME="${{ github.event.inputs.hostname }}"
-          sed -i "s/set system.@system\[-1\].hostname='[^']*'/set system.@system[-1].hostname='$HOSTNAME'/" package/base-files/files/bin/config_generate
-
-          THEME="${{ github.event.inputs.luci_theme }}"
-          sed -i "s/luci-theme-bootstrap/luci-theme-$THEME/g" feeds/luci/collections/luci/Makefile
-
-          echo "===== Personalization: IP=$NEW_IP, Hostname=$HOSTNAME, Theme=$THEME ====="
+          sed -i "s/192.168.[0-9]\{1,3\}.1/${{ inputs.default_ip }}/g" package/base-files/files/bin/config_generate
+          sed -i "s/set system.@system\[-1\].hostname='[^']*'/set system.@system[-1].hostname='${{ inputs.hostname }}'/" package/base-files/files/bin/config_generate
+          sed -i "s/luci-theme-bootstrap/luci-theme-${{ inputs.luci_theme }}/g" feeds/luci/collections/luci/Makefile
 
       - name: Configure build
         run: |
-          set -e
           cd openwrt
-          BOARD="${{ github.event.inputs.board }}"
-          BOARD_SHORT=$(echo "$BOARD" | sed -E 's/ *\(.*\)//' | sed 's/ /-/g')
-          CONFIG_FILE="../config-${BOARD_SHORT}"
-          [ -f "$CONFIG_FILE" ] || { echo "Error: $CONFIG_FILE not found"; exit 1; }
-          cp "$CONFIG_FILE" .config
+          cp "../config-${{ steps.parse.outputs.board_short }}" .config
 
-          # CUSTOM KERNEL: switch to external tree. Without this, kmod versions
-          # get polluted with git refs and APK rejects them.
-          if [ -n "${{ github.event.inputs.custom_kernel_repo }}" ]; then
+          if [ -n "$CUSTOM_KERNEL" ]; then
             sed -i '/^CONFIG_KERNEL_GIT_/d; /^CONFIG_EXTERNAL_KERNEL_TREE=/d; /^CONFIG_DEVEL=/d' .config
-            printf 'CONFIG_DEVEL=y\nCONFIG_EXTERNAL_KERNEL_TREE="%s/custom_kernel"\n' \
-              "${{ github.workspace }}" >> .config
+            printf 'CONFIG_DEVEL=y\nCONFIG_EXTERNAL_KERNEL_TREE="%s/custom_kernel"\n' "${{ github.workspace }}" >> .config
           fi
 
           make defconfig
 
-          if [ -n "${{ github.event.inputs.custom_kernel_repo }}" ] && ! grep -q '^CONFIG_EXTERNAL_KERNEL_TREE="' .config; then
-            echo "FATAL: CONFIG_EXTERNAL_KERNEL_TREE did not survive defconfig"
+          if [ -n "$CUSTOM_KERNEL" ] && ! grep -q '^CONFIG_EXTERNAL_KERNEL_TREE="' .config; then
+            echo "CONFIG_EXTERNAL_KERNEL_TREE did not survive defconfig"
             grep -n 'EXTERNAL_KERNEL_TREE\|KERNEL_GIT' .config || true
             exit 1
           fi
@@ -202,94 +185,48 @@ jobs:
       - name: Build firmware
         run: |
           cd openwrt
-          make -j$(nproc) ${{ github.event.inputs.verbosity == 'Yes' && 'V=s' || '' }}
-          BOARD=$(tr -cs A-Za-z0-9 - <<< '${{ github.event.inputs.board }}' | sed 's/^-//;s/-$//')
-          echo "DEVICE_NAME=_$BOARD" >> "$GITHUB_ENV"; echo "FILE_DATE=_$(date +%Y%m%d%H%M)" >> "$GITHUB_ENV"
+          make -j$(nproc) V=${{ env.verbose }}
 
-      - name: Organize files
-        id: organize
+      - name: Collect ATF artifacts
         run: |
-          cd openwrt/bin/targets/*/*
-          rm -rf packages
-          echo "FIRMWARE=$PWD" >> $GITHUB_ENV
-
-      - name: Collect ATF build artifacts
-        run: |
-          set -e
           cd openwrt
-          mkdir -p "$FIRMWARE/atf"
-
-          STAGING_IMG=$(find staging_dir -maxdepth 4 -type d -name image 2>/dev/null | head -n1)
-          if [ -n "$STAGING_IMG" ]; then
-            for ext in bin fip itb lzma; do
-              cp -vL "$STAGING_IMG"/*.$ext "$FIRMWARE/atf/" 2>/dev/null || true
-            done
-          fi
-
+          fw=$(echo bin/targets/*/*)
+          mkdir -p "$fw/atf"
+          img=$(find staging_dir -maxdepth 4 -type d -name image | head -n1)
+          [ -n "$img" ] && cp -vL "$img"/*.{bin,fip,itb,lzma} "$fw/atf/" 2>/dev/null
           find build_dir -maxdepth 6 -type f \
-            \( -iname '*bl*.bin' -o -iname '*bl*.fip' -o -iname '*bl*.itb' -o -iname '*bl*.lzma' \
-               -o -iname 'flash_table.*' \) \
-            -exec cp -vL {} "$FIRMWARE/atf/" \;
+            \( -iname '*bl*.*' -o -iname 'flash_table.*' \) -exec cp -vL -t "$fw/atf/" {} +
 
-          echo "===== atf/ ====="
-          ls -la "$FIRMWARE/atf/"
-
-      - name: Upload firmware (artifact)
-        uses: actions/upload-artifact@v7
-        with:
-          name: openwrt-firmware
-          path: openwrt/bin/targets/
-          if-no-files-found: warn
-
-      - name: Upload firmware with timestamped name
-        uses: actions/upload-artifact@v7
-        with:
-          name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
-          if-no-files-found: warn
-          path: |
-            ${{ env.FIRMWARE }}/*.bin
-            ${{ env.FIRMWARE }}/*.fip
-            ${{ env.FIRMWARE }}/*.itb
-            ${{ env.FIRMWARE }}/atf/*
-            openwrt/.config
-
-      - name: Generate release tag and notes
-        id: tag
+      - name: Generate release notes
+        id: notes
         run: |
-          echo "release_tag=$(date +%Y.%m.%d-%H%M)" >> "$GITHUB_OUTPUT"
-          NOTES=$RUNNER_TEMP/release.txt
-
+          notes="$RUNNER_TEMP/release.md"
           {
             echo "## OpenWrt $(date +%Y.%m.%d-%H:%M)"
-            echo "- Board: ${{ github.event.inputs.board }}"
-            echo "- Repo: ${{ github.event.inputs.variant }}"
-            if [ -n "${{ github.event.inputs.custom_kernel_repo }}" ]; then
-              echo "- Kernel: ${{ github.event.inputs.custom_kernel_repo }} @ ${CUSTOM_KERNEL_BRANCH} (${CUSTOM_KERNEL_COMMIT})"
-            fi
-            echo "- Hostname: ${{ github.event.inputs.hostname }}"
-            echo "- IP: ${{ github.event.inputs.default_ip }}"
-            echo "- Theme: ${{ github.event.inputs.luci_theme }}"
-            echo
-          } > "$NOTES"
+            echo "- Board: ${{ inputs.board }}"
+            echo "- Repo: ${{ inputs.variant }}"
+            [ -n "$CUSTOM_KERNEL" ] && echo "- Kernel: $CUSTOM_KERNEL @ ${CUSTOM_KERNEL_BRANCH} (${CUSTOM_KERNEL_COMMIT})"
+            echo "- Hostname: ${{ inputs.hostname }}"
+            echo "- IP: ${{ inputs.default_ip }}"
+            echo "- Theme: ${{ inputs.luci_theme }}"
+          } > "$notes"
+          echo "release_tag=$(date +%Y.%m.%d-%H%M)" >> "$GITHUB_OUTPUT"
+          echo "path=$notes" >> "$GITHUB_OUTPUT"
 
-          if [ -f sha256sums ]; then
-            { echo; echo '### sha256sums'; echo '```'; cat sha256sums; echo '```'; } >> "$NOTES"
-          fi
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: openwrt-${{ steps.parse.outputs.board_short }}
+          if-no-files-found: warn
+          archive: false
+          retention-days: 3
+          path: ${{ env.ARTIFACTS }}
 
-          cp "$NOTES" "$GITHUB_WORKSPACE/release.txt"
-          echo "status=success" >> "$GITHUB_OUTPUT"
-
-      - name: Upload firmware to GitHub Release
-        uses: softprops/action-gh-release@master
-        if: steps.tag.outputs.status == 'success' && !cancelled()
+      - name: Create release
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ steps.tag.outputs.release_tag }}
-          body_path: release.txt
-          files: |
-            ${{ env.FIRMWARE }}/*.bin
-            ${{ env.FIRMWARE }}/*.fip
-            ${{ env.FIRMWARE }}/*.itb
-            ${{ env.FIRMWARE }}/atf/*
-            openwrt/.config
+          tag_name: ${{ steps.notes.outputs.release_tag }}
+          body_path: ${{ steps.notes.outputs.path }}
+          files: ${{ env.ARTIFACTS }}
