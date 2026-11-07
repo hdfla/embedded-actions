@@ -216,8 +216,6 @@ jobs:
         with:
           name: openwrt-${{ steps.parse.outputs.board_short }}
           if-no-files-found: warn
-          archive: false
-          retention-days: 3
           path: ${{ env.ARTIFACTS }}
 
       - name: Create release
