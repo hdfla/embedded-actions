@@ -99,13 +99,19 @@ jobs:
           token: ${{ secrets.OWRTPAT }}
           fetch-depth: 1
 
-      - name: Restore build cache
-        uses: stupidloud/cachewrtbuild@main
+      - name: Restore toolchain cache
+        uses: actions/cache/restore@v5
+        id: toolchain_cache
         with:
-          prefix: ${{ env.OPENWRT_DIR }}
-          mixkey: ${{ inputs.board }}
-          ccache: 'false'
-          clean: 'false'
+          key: openwrt_toolchain_${{ runner.os }}_${{ runner.arch }}_${{ steps.parse.outputs.board_short }}_${{ hashFiles(format('config-{0}', steps.parse.outputs.board_short)) }}
+          path: |
+            openwrt/build_dir/host
+            openwrt/build_dir/hostpkg
+            openwrt/build_dir/toolchain-*
+            openwrt/staging_dir/host
+            openwrt/staging_dir/hostpkg
+            openwrt/staging_dir/toolchain-*
+            openwrt/dl
 
       - name: Install host dependencies
         run: |
@@ -186,6 +192,20 @@ jobs:
         run: |
           cd openwrt
           make -j$(nproc) V=${{ env.verbose }}
+
+      - name: Save toolchain cache
+        uses: actions/cache/save@v5
+        if: always()
+        with:
+          key: ${{ steps.toolchain_cache.outputs.cache-primary-key }}
+          path: |
+            openwrt/build_dir/host
+            openwrt/build_dir/hostpkg
+            openwrt/build_dir/toolchain-*
+            openwrt/staging_dir/host
+            openwrt/staging_dir/hostpkg
+            openwrt/staging_dir/toolchain-*
+            openwrt/dl
 
       - name: Collect ATF artifacts
         run: |
