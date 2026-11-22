@@ -1,0 +1,51 @@
+#!/bin/sh
+# /etc/hotplug.d/iface/20-enable-kv
+# Enable 802.11k/v on every SSID whenever a wireless interface comes up.
+
+[ "$ACTION" = "ifup" ] || exit 0
+[ -e "/sys/class/net/$INTERFACE/phy80211" ] || exit 0
+
+. /lib/functions.sh
+LOCK=/tmp/.enable-kv.lock
+trap 'rm -f "$LOCK"' EXIT INT TERM
+
+if command -v flock >/dev/null 2>&1; then
+    exec 9>"$LOCK"
+    flock -n 9 || exit 0
+else
+    [ -f "$LOCK" ] && exit 0
+    touch "$LOCK"
+fi
+
+ACTED=0
+
+enable_kv() {
+    local section="$1"
+    local type k v
+    config_get type "$section" type
+    [ "$type" = "wifi-iface" ] || return 0
+
+    config_get k "$section" ieee80211k
+    config_get v "$section" bss_transition
+
+    if [ "$k" != "1" ]; then
+        if uci -q set wireless."$section".ieee80211k='1'; then
+            ACTED=1
+        fi
+    fi
+    if [ "$v" != "1" ]; then
+        if uci -q set wireless."$section".bss_transition='1'; then
+            ACTED=1
+        fi
+    fi
+}
+
+config_load wireless
+config_foreach enable_kv wifi-iface
+
+if [ "$ACTED" = "1" ]; then
+    uci -q commit wireless
+    wifi reload
+fi
+
+exit 0
