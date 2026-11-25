@@ -75,7 +75,6 @@ jobs:
         ${{ github.workspace }}/openwrt/bin/targets/*/*/*.bin
         ${{ github.workspace }}/openwrt/bin/targets/*/*/*.fip
         ${{ github.workspace }}/openwrt/bin/targets/*/*/*.itb
-        ${{ github.workspace }}/openwrt/bin/targets/*/*/atf/*
         ${{ github.workspace }}/openwrt/.config
     steps:
       - name: Parse inputs
@@ -206,14 +205,6 @@ jobs:
             openwrt/staging_dir/hostpkg
             openwrt/staging_dir/toolchain-*
             openwrt/dl
-
-      - name: Collect ATF artifacts
-        run: |
-          cd openwrt
-          fw=$(echo bin/targets/*/*)/atf
-          mkdir -p "$fw"
-          find staging_dir -path '*/image/*' -type f \( -name '*.bin' -o -name '*.fip' -o -name '*.itb' -o -name '*.lzma' \) -exec cp -vLt "$fw" {} + || true
-          find build_dir -maxdepth 6 -type f \( -iname '*bl*.bin' -o -iname '*bl*.fip' -o -iname '*bl*.itb' -o -iname '*bl*.lzma' -o -iname 'flash_table.*' \) -exec cp -vLt "$fw" {} + || true
 
       - name: Generate release notes
         id: notes
